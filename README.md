@@ -65,8 +65,10 @@ graph LR
     API -->|If URL| Scraper
     API -->|If Image| Vision
     API -->|If Text| TextClean
+    API -->|Async Check| DomainRep
     
     Scraper --> TextClean
+    DomainRep -->|Credibility Score| Agent
     
     Vision --> GeminiVision
     GeminiVision -->|Image Context| Agent
@@ -78,12 +80,11 @@ graph LR
     Agent <--> LLM
     Agent <--> FactCheck
     Agent <--> WebSearch
-    Agent <--> DomainRep
 
     %% Finalization
-    Agent --> DB
-    Agent --> API
-    API --> UI
+    Agent -->|Verdict JSON| API
+    API -->|Save Post| DB
+    API -->|JSON Response| UI
     UI --> User
 ```
 
