@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explainable misinformation early-warning dashboard">
+  <title>SignalWatch — Misinformation Intelligence</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#" aria-label="SignalWatch home">
+        <span class="brand-mark">S</span>
+        <span><strong>SignalWatch</strong><small>Intelligence desk</small></span>
+      </a>
+
+      <nav class="nav" aria-label="Main navigation">
+        <button class="nav-item active" data-page="analyze"><span>⌕</span> Analyze</button>
+        <button class="nav-item" data-page="feed"><span>◫</span> Live feed</button>
+        <button class="nav-item" data-page="dashboard"><span>↗</span> Early warning</button>
+      </nav>
+
+      <div class="system-card">
+        <div class="status-row"><span class="status-dot"></span> System operational</div>
+        <div class="system-stats">
+          <div><strong id="side-total">—</strong><small>Analyzed</small></div>
+          <div><strong id="side-risk">—</strong><small>Avg. risk</small></div>
+        </div>
+      </div>
+      <p class="sidebar-foot">Explainable AI · Semantic clustering · Live velocity</p>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="menu-button" id="menu-button" aria-label="Toggle navigation">☰</button>
+        <div><span class="eyebrow">Misinformation operations center</span></div>
+        <div class="live-pill"><span></span> Live</div>
+      </header>
+
+      <section class="page active" id="page-analyze">
+        <div class="page-heading">
+          <div><p class="kicker">Claim intelligence</p><h1>Analyze a suspicious claim</h1><p>Inspect language, source reputation, and corroborating evidence in one pass.</p></div>
+        </div>
+
+        <div class="analyze-grid">
+          <form class="panel input-panel" id="analyze-form">
+            <div class="panel-head"><div><span class="step">01</span><h2>Source material</h2></div><span class="limit" id="char-count">0 / 10,000</span></div>
+            <label for="claim-text">Content to investigate</label>
+            <textarea id="claim-text" maxlength="10000" placeholder="Paste a headline, social post, WhatsApp forward, or article excerpt…"></textarea>
+            <label for="claim-url">Source URL <span>Optional</span></label>
+            <input id="claim-url" type="url" placeholder="https://example.com/article">
+            <label for="claim-image">Context image <span>Optional · JPEG, PNG, or WebP up to 5 MB</span></label>
+            <label class="upload-box" for="claim-image"><span class="upload-icon">▧</span><span><strong>Add an image for context verification</strong><small id="image-name">Detect reused, unrelated, or misleading visuals</small></span></label>
+            <input id="claim-image" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp">
+            <button class="primary-button" type="submit" id="analyze-button"><span>Run intelligence scan</span><b>→</b></button>
+            <p class="form-note">Your input is evaluated against linguistic, domain, and evidence signals.</p>
+          </form>
+
+          <aside class="panel methodology">
+            <div class="panel-head"><div><span class="step">02</span><h2>Detection stack</h2></div></div>
+            <div class="method"><span class="method-icon violet">Aa</span><div><strong>Linguistic bias</strong><p>Emotion, urgency, capitalization, and manipulation cues.</p></div></div>
+            <div class="method"><span class="method-icon blue">◎</span><div><strong>Source reputation</strong><p>Domain credibility and known provenance signals.</p></div></div>
+            <div class="method"><span class="method-icon green">≋</span><div><strong>Evidence consensus</strong><p>Relevant fact checks and supporting or refuting sources.</p></div></div>
+            <div class="privacy-note">Analysis is transparent: every verdict includes its reasoning and evidence.</div>
+          </aside>
+        </div>
+        <div id="analysis-result" aria-live="polite"></div>
+      </section>
+
+      <section class="page" id="page-feed">
+        <div class="page-heading row-heading">
+          <div><p class="kicker">Continuous monitoring</p><h1>Live claim feed</h1><p>Review every analyzed narrative and help improve future classifications.</p></div>
+          <div class="export-actions"><a class="secondary-button" href="/export/csv">CSV</a><a class="secondary-button" href="/export/json">JSON</a></div>
+        </div>
+        <div class="filter-bar panel"><label for="verdict-filter">Verdict</label><select id="verdict-filter"><option value="">All classifications</option></select><span id="feed-count">Loading…</span></div>
+        <div class="feed-list" id="feed-list"><div class="skeleton"></div><div class="skeleton"></div></div>
+      </section>
+
+      <section class="page" id="page-dashboard">
+        <div class="page-heading">
+          <div><p class="kicker">Narrative velocity</p><h1>Early-warning radar</h1><p>Semantic claim clusters ranked by recent spread and risk.</p></div>
+        </div>
+        <div class="metric-grid" id="dashboard-metrics"></div>
+        <div class="section-title"><div><p class="kicker">Active narratives</p><h2>Velocity watchlist</h2></div><span>1h · 6h · 24h windows</span></div>
+        <div class="trend-list" id="trend-list"><div class="skeleton"></div></div>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="/static/utils.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

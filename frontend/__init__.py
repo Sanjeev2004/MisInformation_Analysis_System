@@ -1,0 +1,1 @@
+"""Frontend asset package."""
