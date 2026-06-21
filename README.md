@@ -15,6 +15,78 @@ SignalWatch detects, explains, clusters, and tracks suspicious online claims. It
 - Filtered CSV and JSON exports
 - Responsive browser interface with no frontend framework or CDN dependency
 
+## Architecture
+
+Here is the visual workflow representing how a claim flows through the system from the moment a user submits it, to when the final verdict is rendered.
+
+```mermaid
+graph LR
+    %% Styling
+    classDef user fill:#f9f,stroke:#333,stroke-width:2px;
+    classDef frontend fill:#bbf,stroke:#333,stroke-width:2px;
+    classDef backend fill:#fbb,stroke:#333,stroke-width:2px;
+    classDef database fill:#bfb,stroke:#333,stroke-width:2px;
+    classDef external fill:#eee,stroke:#333,stroke-width:2px;
+
+    %% Nodes
+    User([User Submit]):::user
+    UI[Frontend Dashboard]:::frontend
+
+    subgraph Backend[FastAPI Backend Server]
+        API[API Endpoint: /analyze]:::backend
+        
+        %% Three distinct pipelines
+        Scraper[URL Scraper]:::backend
+        Vision[Image Base64 Decoder]:::backend
+        TextClean[Text Sanitizer]:::backend
+        
+        Extract[NLP Claim Extractor]:::backend
+        Agent[LangGraph Agent]:::backend
+    end
+
+    subgraph Ext[AI & External Tools]
+        GeminiVision[Google Gemini Vision]:::external
+        LLM[Groq Llama-3.3]:::external
+        FactCheck[Google Fact Check]:::external
+        WebSearch[DuckDuckGo Search]:::external
+        DomainRep[Domain Reputation]:::external
+    end
+
+    DB[(SQLite Database)]:::database
+
+    %% Input Flow
+    User -->|URL| UI
+    User -->|Image/Pic| UI
+    User -->|Text Content| UI
+    
+    UI --> API
+    
+    %% Split Pipelines
+    API -->|If URL| Scraper
+    API -->|If Image| Vision
+    API -->|If Text| TextClean
+    
+    Scraper --> TextClean
+    
+    Vision --> GeminiVision
+    GeminiVision -->|Image Context| Agent
+    
+    TextClean --> Extract
+    Extract -->|Core Claim| Agent
+    
+    %% Agentic Loop
+    Agent <--> LLM
+    Agent <--> FactCheck
+    Agent <--> WebSearch
+    Agent <--> DomainRep
+
+    %% Finalization
+    Agent --> DB
+    Agent --> API
+    API --> UI
+    UI --> User
+```
+
 ## Stack
 
 - Backend: FastAPI and Python 3.10+
