@@ -115,6 +115,7 @@ function renderAnalysis(data) {
   $("#analysis-result").innerHTML = `<article class="panel result">
     <div class="result-top"><div class="result-cell"><small>Verdict</small><strong class="${verdictClass(data.verdict)}">${escapeHtml(data.verdict)}</strong></div>
     <div class="result-cell"><small>Risk score</small><strong class="risk-value ${riskLevel(data.overall_risk)}">${data.overall_risk}%</strong></div>
+    <div class="result-cell"><small>Viral Risk (ASM)</small><strong class="risk-value ${riskLevel(data.viral_propagation_risk || 0)}">${data.viral_propagation_risk || 0}%</strong></div>
     <div class="result-cell"><small>Confidence</small><strong>${data.confidence}%</strong></div></div>
     <div class="result-body"><h3>Why the system reached this verdict</h3><p>${escapeHtml(data.explanation || "No explanation available.")}</p>
     ${domainSignals}${vision}${cues ? `<div class="cue-list">${cues}</div>` : ""}<h3>Corroborating evidence</h3>

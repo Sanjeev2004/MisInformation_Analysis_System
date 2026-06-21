@@ -8,7 +8,8 @@ from langgraph.graph import StateGraph, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from duckduckgo_search import DDGS
 
-from backend.config import GEMINI_API_KEY
+from langchain_groq import ChatGroq
+from backend.config import GROQ_API_KEY
 from backend.services.retriever import retrieve_fact_checks
 
 class AgentState(TypedDict):
@@ -17,8 +18,8 @@ class AgentState(TypedDict):
     loops: int
     final_result: Dict[str, Any]
 
-# Using gemini-1.5-pro or flash for the agent
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=GEMINI_API_KEY, temperature=0.2)
+# Using llama-3.3-70b-versatile for the agent
+llm = ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=GROQ_API_KEY, temperature=0.2)
 
 def get_tools():
     return [
@@ -60,7 +61,7 @@ def get_tools():
                             "type": "object",
                             "properties": {
                                 "phrase": {"type": "string"},
-                                "category": {"type": "string", "enum": ["Loaded Language", "Urgency", "Absolute Claim", "Subjective Opinion"]}
+                                "category": {"type": "string"}
                             }
                         }
                     }
@@ -99,27 +100,31 @@ async def tool_node(state: AgentState):
     tool_messages = []
     final_result = state.get("final_result", None)
     
-    if isinstance(last_message, AIMessage) and hasattr(last_message, 'tool_calls'):
-        for tool_call in last_message.tool_calls:
-            name = tool_call['name']
-            args = tool_call['args']
-            tool_call_id = tool_call['id']
+    if isinstance(last_message, AIMessage) and hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+        # Mutate the AIMessage to only have the first tool call to prevent Gemini validation errors on parallel tools
+        if len(last_message.tool_calls) > 1:
+            last_message.tool_calls = [last_message.tool_calls[0]]
             
-            if name == "submit_verdict":
-                final_result = args
-                tool_messages.append(ToolMessage(content="Verdict submitted.", name=name, tool_call_id=tool_call_id))
-            elif name == "fact_check_search":
-                res = await retrieve_fact_checks(args.get('query', ''))
-                tool_messages.append(ToolMessage(content=json.dumps(res), name=name, tool_call_id=tool_call_id))
-            elif name == "web_search":
-                def do_search():
-                    try:
-                        return DDGS().text(args.get('query', ''), max_results=3)
-                    except Exception as e:
-                        return [{"error": str(e)}]
-                res = await asyncio.to_thread(do_search)
-                tool_messages.append(ToolMessage(content=json.dumps(res), name=name, tool_call_id=tool_call_id))
-                
+        tool_call = last_message.tool_calls[0]
+        name = tool_call['name']
+        args = tool_call['args']
+        tool_call_id = tool_call['id']
+        
+        if name == "submit_verdict":
+            final_result = args
+            tool_messages.append(ToolMessage(content="Verdict submitted.", name=name, tool_call_id=tool_call_id))
+        elif name == "fact_check_search":
+            res = await retrieve_fact_checks(args.get('query', ''))
+            tool_messages.append(ToolMessage(content=json.dumps(res), name=name, tool_call_id=tool_call_id))
+        elif name == "web_search":
+            def do_search():
+                try:
+                    return DDGS().text(args.get('query', ''), max_results=3)
+                except Exception as e:
+                    return [{"error": str(e)}]
+            res = await asyncio.to_thread(do_search)
+            tool_messages.append(ToolMessage(content=json.dumps(res), name=name, tool_call_id=tool_call_id))
+            
     return {"messages": tool_messages, "final_result": final_result}
 
 def should_continue(state: AgentState) -> str:

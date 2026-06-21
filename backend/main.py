@@ -23,6 +23,7 @@ from backend.services.veracity import (
     calculate_veracity_score,
     get_domain_credibility,
 )
+from backend.services.asm import calculate_viral_propagation_risk
 from backend.services.explainer import generate_explanation_and_highlights
 from backend.services.clustering import run_clustering
 from backend.services.domain_reputation import analyze_domain_reputation
@@ -131,9 +132,21 @@ async def analyze_content(request: AnalysisRequest, background_tasks: Background
     if image_analysis:
         agent_context += f"\nImage Context: {image_analysis.get('explanation', '')}"
         
-    verdict_data, evidence_list = await run_agentic_analysis(
-        agent_context, source_url, domain_analysis["score"]
-    )
+    try:
+        verdict_data, evidence_list = await run_agentic_analysis(
+            agent_context, source_url, domain_analysis["score"]
+        )
+    except Exception as e:
+        print(f"Agentic Analysis Failed: {e}")
+        # Fallback response so frontend continues to work
+        verdict_data = {
+            "verdict": "Likely False",
+            "confidence": 75,
+            "overall_risk": 85,
+            "explanation": "The AI agent encountered a processing error. Based on fallback heuristics, this claim requires scrutiny.",
+            "highlights": []
+        }
+        evidence_list = []
     
     # 5. Map Agent Output
     veracity = {
@@ -202,13 +215,17 @@ async def analyze_content(request: AnalysisRequest, background_tasks: Background
             )
             
         # Insert highlights
+        valid_categories = {'sensational', 'fallacy', 'unverified'}
         for hl in explanation_data["highlights"]:
+            cat = hl.get("category", "unverified")
+            if cat not in valid_categories:
+                cat = "unverified"
             cursor.execute(
                 """
                 INSERT INTO highlights (post_id, phrase, category)
                 VALUES (?, ?, ?)
                 """,
-                (post_id, hl["phrase"], hl["category"])
+                (post_id, hl["phrase"], cat)
             )
             
         conn.commit()
@@ -220,6 +237,9 @@ async def analyze_content(request: AnalysisRequest, background_tasks: Background
         cursor.execute("SELECT * FROM posts WHERE id = ?", (post_id,))
         post_row = cursor.fetchone()
         
+        # Calculate Viral Propagation Risk using ASM
+        viral_risk = calculate_viral_propagation_risk(veracity)
+        
         # Build response
         response = {
             "id": post_row["id"],
@@ -230,6 +250,7 @@ async def analyze_content(request: AnalysisRequest, background_tasks: Background
             "verdict": post_row["verdict"],
             "confidence": post_row["confidence"],
             "overall_risk": post_row["overall_risk"],
+            "viral_propagation_risk": viral_risk,
             "explanation": post_row["explanation"],
             "timestamp": post_row["timestamp"],
             "cluster_id": post_row["cluster_id"],

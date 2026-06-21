@@ -170,26 +170,5 @@ async def retrieve_fact_checks(claim_text: str) -> list:
     if mock_results:
         return mock_results
         
-    # If no matches in mock, generate generic supporting/refuting snippets dynamically based on query terms
-    # to simulate news articles
-    terms = [t for t in claim_text.split() if len(t) > 3]
-    entity = terms[0] if terms else "this claim"
-    
-    return [
-        {
-            "title": f"Scientific research regarding {entity} developments",
-            "snippet": f"Major academic institutions released new reports on {claim_text.lower()} showing mixed preliminary results.",
-            "url": "https://www.reuters.com",
-            "source": "Reuters Science",
-            "rating": "Varying consensus",
-            "similarity_score": 0.55
-        },
-        {
-            "title": f"Fact Check: Public statements on {entity}",
-            "snippet": f"Independent journalists investigate whether {claim_text.lower()} holds up under validation of core assumptions.",
-            "url": "https://www.factcheck.org",
-            "source": "FactCheck.org",
-            "rating": "Needs Verification",
-            "similarity_score": 0.48
-        }
-    ]
+    # If no matches in mock, return an empty list so the agent knows to try web_search
+    return []
