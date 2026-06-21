@@ -6,7 +6,7 @@ import socket
 import ssl
 import httpx
 import numpy as np
-from sklearn.linear_model import LogisticRegression
+from xgboost import XGBClassifier
 
 from backend.services.ingestion import extract_domain
 
@@ -23,7 +23,7 @@ _TRAIN_X = np.array([
     [3.0, 1, 1, 1, .55, .08, 1], [1.0, 1, 0, 0, .95, .30, 3],
 ], dtype=float)
 _TRAIN_Y = np.array([1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0])
-_MODEL = LogisticRegression(C=1.2, random_state=7).fit(_TRAIN_X, _TRAIN_Y)
+_MODEL = XGBClassifier(random_state=7).fit(_TRAIN_X, _TRAIN_Y)
 
 
 def _tls_valid(domain: str) -> bool:

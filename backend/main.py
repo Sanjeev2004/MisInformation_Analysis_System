@@ -122,23 +122,35 @@ async def analyze_content(request: AnalysisRequest, background_tasks: Background
     extraction = extract_claim_and_entities(final_text)
     claim_text = extraction.get("claim_text") or final_text
     
-    # 3. Evidence Retrieval
-    evidence_list = await retrieve_fact_checks(claim_text)
-    
-    # 4. Veracity Scoring
+    # 3. Domain Scoring
     domain_analysis = await analyze_domain_reputation(source_url)
-    veracity = calculate_veracity_score(
-        final_text, source_url, evidence_list, domain_analysis["score"],
-        image_analysis.get("mismatch_score") if image_analysis else None,
+    
+    # 4. LangGraph Agent Analysis
+    from backend.services.agent import run_agentic_analysis
+    agent_context = claim_text
+    if image_analysis:
+        agent_context += f"\nImage Context: {image_analysis.get('explanation', '')}"
+        
+    verdict_data, evidence_list = await run_agentic_analysis(
+        agent_context, source_url, domain_analysis["score"]
     )
     
-    # 5. Explanations & XAI Highlights
-    explanation_data = generate_explanation_and_highlights(
-        final_text, 
-        veracity["verdict"], 
-        veracity["metrics"], 
-        evidence_list
-    )
+    # 5. Map Agent Output
+    veracity = {
+        "verdict": verdict_data.get("verdict", "Uncertain"),
+        "confidence": float(verdict_data.get("confidence", 0.0)),
+        "overall_risk": float(verdict_data.get("overall_risk", 50.0)),
+        "metrics": {
+            "linguistic_bias": 0.5,
+            "domain_credibility": domain_analysis["score"],
+            "evidence_contradiction": 0.5,
+        }
+    }
+    
+    explanation_data = {
+        "explanation": verdict_data.get("explanation", "No explanation provided."),
+        "highlights": verdict_data.get("highlights", [])
+    }
     
     # 6. Database Insertion
     conn = get_db_connection()
