@@ -123,18 +123,18 @@ async def analyze_content(request: AnalysisRequest, background_tasks: Background
     extraction = extract_claim_and_entities(final_text)
     claim_text = extraction.get("claim_text") or final_text
     
-    # 3. Domain Scoring
-    domain_analysis = await analyze_domain_reputation(source_url)
-    
-    # 4. LangGraph Agent Analysis
+    # 3. LangGraph Agent Analysis
     from backend.services.agent import run_agentic_analysis
-    agent_context = claim_text
-    if image_analysis:
-        agent_context += f"\nImage Context: {image_analysis.get('explanation', '')}"
-        
+    
+    domain_name = scraped_data["domain"] if scraped_data else (extract_domain(source_url) if source_url else None)
+    
     try:
-        verdict_data, evidence_list = await run_agentic_analysis(
-            agent_context, source_url, domain_analysis["score"]
+        verdict_data, evidence_list, domain_score, post_id = await run_agentic_analysis(
+            claim_text=claim_text, 
+            source_url=source_url, 
+            final_text=final_text, 
+            domain_name=domain_name, 
+            image_analysis=image_analysis
         )
     except Exception as e:
         print(f"Agentic Analysis Failed: {e}")
@@ -155,7 +155,7 @@ async def analyze_content(request: AnalysisRequest, background_tasks: Background
         "overall_risk": float(verdict_data.get("overall_risk", 50.0)),
         "metrics": {
             "linguistic_bias": 0.5,
-            "domain_credibility": domain_analysis["score"],
+            "domain_credibility": domain_score if 'domain_score' in locals() else 0.5,
             "evidence_contradiction": 0.5,
         }
     }
@@ -165,109 +165,68 @@ async def analyze_content(request: AnalysisRequest, background_tasks: Background
         "highlights": verdict_data.get("highlights", [])
     }
     
-    # 6. Database Insertion
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    # 6. Database Insertion moved to LangGraph Agent
     
-    domain_name = scraped_data["domain"] if scraped_data else (extract_domain(source_url) if source_url else None)
-        
-    try:
-        cursor.execute(
-            """
-            INSERT INTO posts (
-                text, claim_text, url, domain, verdict, confidence, overall_risk, explanation,
-                linguistic_bias, domain_credibility, evidence_contradiction, image_analysis
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                final_text,
-                claim_text,
-                source_url,
-                domain_name,
-                veracity["verdict"],
-                veracity["confidence"],
-                veracity["overall_risk"],
-                explanation_data["explanation"],
-                veracity["metrics"]["linguistic_bias"],
-                veracity["metrics"]["domain_credibility"],
-                veracity["metrics"]["evidence_contradiction"],
-                json.dumps(image_analysis) if image_analysis else None,
-            )
-        )
-        post_id = cursor.lastrowid
-        
-        # Insert evidence
-        for ev in evidence_list:
-            cursor.execute(
-                """
-                INSERT INTO evidence (post_id, title, snippet, url, source, type, similarity_score)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    post_id,
-                    ev["title"],
-                    ev["snippet"],
-                    ev["url"],
-                    ev["source"],
-                    ev.get("type", "fact-check"),
-                    ev["similarity_score"]
-                )
-            )
-            
-        # Insert highlights
-        valid_categories = {'sensational', 'fallacy', 'unverified'}
-        for hl in explanation_data["highlights"]:
-            cat = hl.get("category", "unverified")
-            if cat not in valid_categories:
-                cat = "unverified"
-            cursor.execute(
-                """
-                INSERT INTO highlights (post_id, phrase, category)
-                VALUES (?, ?, ?)
-                """,
-                (post_id, hl["phrase"], cat)
-            )
-            
-        conn.commit()
-        
+    # Trigger clustering asynchronously if we have a post_id
+    if 'post_id' in locals() and post_id:
+        background_tasks.add_task(assign_cluster, post_id, claim_text)      
         # 7. Run clustering in background
         background_tasks.add_task(run_clustering)
         
         # Fetch the complete inserted post
-        cursor.execute("SELECT * FROM posts WHERE id = ?", (post_id,))
-        post_row = cursor.fetchone()
-        
-        # Calculate Viral Propagation Risk using ASM
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM posts WHERE id = ?", (post_id,))
+            post_row = cursor.fetchone()
+            
+            # Calculate Viral Propagation Risk using ASM
+            viral_risk = calculate_viral_propagation_risk(veracity)
+            
+            # Build response
+            response = {
+                "id": post_row["id"],
+                "text": post_row["text"],
+                "claim_text": post_row["claim_text"],
+                "url": post_row["url"],
+                "domain": post_row["domain"],
+                "verdict": post_row["verdict"],
+                "confidence": post_row["confidence"],
+                "overall_risk": post_row["overall_risk"],
+                "viral_propagation_risk": viral_risk,
+                "explanation": post_row["explanation"],
+                "timestamp": post_row["timestamp"],
+                "cluster_id": post_row["cluster_id"],
+                "evidence": evidence_list,
+                "highlights": explanation_data["highlights"],
+                "image_analysis": image_analysis,
+                "domain_analysis": {"score": domain_score} if 'domain_score' in locals() else None,
+            }
+            return response
+        finally:
+            conn.close()
+    else:
+        # Build a fallback response if post_id is not available
         viral_risk = calculate_viral_propagation_risk(veracity)
-        
-        # Build response
         response = {
-            "id": post_row["id"],
-            "text": post_row["text"],
-            "claim_text": post_row["claim_text"],
-            "url": post_row["url"],
-            "domain": post_row["domain"],
-            "verdict": post_row["verdict"],
-            "confidence": post_row["confidence"],
-            "overall_risk": post_row["overall_risk"],
+            "id": None,
+            "text": final_text,
+            "claim_text": claim_text,
+            "url": source_url,
+            "domain": domain_name,
+            "verdict": veracity["verdict"],
+            "confidence": veracity["confidence"],
+            "overall_risk": veracity["overall_risk"],
             "viral_propagation_risk": viral_risk,
-            "explanation": post_row["explanation"],
-            "timestamp": post_row["timestamp"],
-            "cluster_id": post_row["cluster_id"],
+            "explanation": explanation_data["explanation"],
+            "timestamp": None,
+            "cluster_id": None,
             "evidence": evidence_list,
             "highlights": explanation_data["highlights"],
             "image_analysis": image_analysis,
-            "domain_analysis": domain_analysis,
+            "domain_analysis": {"score": domain_score} if 'domain_score' in locals() else None,
         }
-        
         return response
-        
-    except Exception as e:
-        conn.rollback()
-        logger.error(f"Analysis pipeline error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Analysis failed. Please try again.")
-    finally:
-        conn.close()
 
 @app.get("/feed")
 def get_feed(verdict: Optional[str] = None):

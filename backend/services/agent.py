@@ -11,6 +11,8 @@ from duckduckgo_search import DDGS
 from langchain_groq import ChatGroq
 from backend.config import GROQ_API_KEY
 from backend.services.retriever import retrieve_fact_checks
+from backend.services.domain_reputation import analyze_domain_reputation
+from backend.database import get_db_connection
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
@@ -43,6 +45,17 @@ def get_tools():
                     "query": {"type": "string", "description": "The search query"}
                 },
                 "required": ["query"]
+            }
+        },
+        {
+            "name": "check_domain_reputation",
+            "description": "Checks the credibility and safety of a given source URL. Call this if a URL is provided.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "The URL to check"}
+                },
+                "required": ["url"]
             }
         },
         {
@@ -84,8 +97,9 @@ async def agent_node(state: AgentState):
             "Your task is to verify the following claim by gathering evidence using your tools. "
             "1. Use `fact_check_search` to find existing fact-checks.\n"
             "2. If needed, use `web_search` to find broader context.\n"
-            "3. Synthesize the evidence and use `submit_verdict` to return your final analysis.\n"
-            "Do NOT use submit_verdict until you have searched for evidence."
+            "3. If a Source URL is provided, you MUST use `check_domain_reputation` to evaluate its credibility.\n"
+            "4. Synthesize the evidence and use `submit_verdict` to return your final analysis.\n"
+            "Do NOT use submit_verdict until you have searched for evidence and checked domain reputation if applicable."
         ))
         human_msg = HumanMessage(content=f"Investigate this claim context:\n{claim}")
         messages = [sys_msg, human_msg]
@@ -124,6 +138,10 @@ async def tool_node(state: AgentState):
                     return [{"error": str(e)}]
             res = await asyncio.to_thread(do_search)
             tool_messages.append(ToolMessage(content=json.dumps(res), name=name, tool_call_id=tool_call_id))
+        elif name == "check_domain_reputation":
+            url = args.get('url', '')
+            res = await analyze_domain_reputation(url)
+            tool_messages.append(ToolMessage(content=json.dumps(res), name=name, tool_call_id=tool_call_id))
             
     return {"messages": tool_messages, "final_result": final_result}
 
@@ -159,13 +177,17 @@ workflow.add_edge("tools", "agent")
 
 compiled_agent = workflow.compile()
 
-async def run_agentic_analysis(claim_text: str, source_url: str = None, domain_score: float = None):
-    """Executes the LangGraph autonomous agent to analyze the claim."""
+async def run_agentic_analysis(
+    claim_text: str, 
+    source_url: str = None, 
+    final_text: str = None, 
+    domain_name: str = None, 
+    image_analysis: dict = None
+):
+    """Executes the LangGraph autonomous agent to analyze the claim and saves to DB."""
     context = claim_text
     if source_url:
         context += f"\nSource URL: {source_url}"
-    if domain_score is not None:
-        context += f"\nDomain Credibility Score (0.0 to 1.0, lower is riskier): {domain_score}"
         
     final_state = await compiled_agent.ainvoke({
         "claim": context,
@@ -204,4 +226,82 @@ async def run_agentic_analysis(claim_text: str, source_url: str = None, domain_s
             "highlights": []
         }
         
-    return result, evidence_list
+    # Extract domain credibility score if tool was called
+    domain_credibility = 0.5
+    for msg in final_state["messages"]:
+        if getattr(msg, "type", "") == "tool" and msg.name == "check_domain_reputation":
+            try:
+                data = json.loads(msg.content)
+                domain_credibility = data.get("score", 0.5)
+            except Exception:
+                pass
+                
+    # Database Insertion
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO posts (
+                text, claim_text, url, domain, verdict, confidence, overall_risk, explanation,
+                linguistic_bias, domain_credibility, evidence_contradiction, image_analysis
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                final_text or claim_text,
+                claim_text,
+                source_url,
+                domain_name,
+                result.get("verdict", "Uncertain"),
+                float(result.get("confidence", 0.0)),
+                float(result.get("overall_risk", 50.0)),
+                result.get("explanation", "No explanation provided."),
+                0.5,
+                domain_credibility,
+                0.5,
+                json.dumps(image_analysis) if image_analysis else None
+            )
+        )
+        conn.commit()
+        post_id = cursor.lastrowid
+        
+        # Insert evidence
+        for ev in evidence_list:
+            cursor.execute(
+                """
+                INSERT INTO evidence (post_id, title, snippet, url, source, type, similarity_score)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    post_id,
+                    ev["title"],
+                    ev["snippet"],
+                    ev["url"],
+                    ev["source"],
+                    ev.get("type", "fact-check"),
+                    ev["similarity_score"]
+                )
+            )
+            
+        # Insert highlights
+        valid_categories = {'sensational', 'fallacy', 'unverified'}
+        highlights = result.get("highlights", [])
+        for hl in highlights:
+            cat = hl.get("category", "unverified")
+            if cat not in valid_categories:
+                cat = "unverified"
+            cursor.execute(
+                """
+                INSERT INTO highlights (post_id, phrase, category)
+                VALUES (?, ?, ?)
+                """,
+                (post_id, hl["phrase"], cat)
+            )
+            
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Agent DB Save Failed: {e}")
+        post_id = None
+        
+    return result, evidence_list, domain_credibility, post_id
